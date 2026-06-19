@@ -994,6 +994,12 @@ class MambaManager(SingleTypeKVCacheManager):
 
         block_size = kv_cache_spec.block_size
         max_num_blocks = max_length // block_size
+        if drop_eagle_block:
+            # EAGLE/MTP cache lookup asks managers to match one block past the
+            # replay boundary and then drop it. Mamba prefix hits are sparse
+            # state checkpoints searched from right to left, so skipping that
+            # rightmost candidate is equivalent to the full-attention pop.
+            max_num_blocks = max(max_num_blocks - 1, 0)
         # Search from right to left and early stop when a match is found.
         for i in range(max_num_blocks - 1, -1, -1):
             if cached_block := block_pool.get_cached_block(

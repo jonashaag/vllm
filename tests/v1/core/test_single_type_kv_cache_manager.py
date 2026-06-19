@@ -14,11 +14,60 @@ from vllm.v1.core.kv_cache_utils import (
 )
 from vllm.v1.core.single_type_kv_cache_manager import (
     ChunkedLocalAttentionManager,
+    MambaManager,
     SlidingWindowManager,
 )
-from vllm.v1.kv_cache_interface import ChunkedLocalAttentionSpec, SlidingWindowSpec
+from vllm.v1.kv_cache_interface import (
+    ChunkedLocalAttentionSpec,
+    MambaSpec,
+    SlidingWindowSpec,
+)
 
 pytestmark = pytest.mark.cpu_test
+
+
+def test_mamba_prefix_hit_drops_eagle_lookahead_block():
+    block_size = 4
+    mamba_spec = MambaSpec(
+        block_size=block_size,
+        shapes=((1,),),
+        dtypes=(torch.float32,),
+        mamba_cache_mode="align",
+    )
+    block_pool = BlockPool(
+        num_gpu_blocks=100, enable_caching=True, hash_block_size=block_size
+    )
+    block_hashes = [BlockHash(str(i).encode()) for i in range(4)]
+
+    for i, block_hash in enumerate(block_hashes):
+        block_pool.cached_block_hash_to_block.insert(
+            make_block_hash_with_group_id(block_hash, 0),
+            block_pool.blocks[i + 10],
+        )
+
+    computed_blocks = MambaManager.find_longest_cache_hit(
+        block_hashes=block_hashes,
+        max_length=len(block_hashes) * block_size,
+        kv_cache_group_ids=[0],
+        block_pool=block_pool,
+        kv_cache_spec=mamba_spec,
+        drop_eagle_block=False,
+        alignment_tokens=block_size,
+    )[0]
+    assert len(computed_blocks) == 4
+    assert computed_blocks[-1].block_id == 13
+
+    computed_blocks = MambaManager.find_longest_cache_hit(
+        block_hashes=block_hashes,
+        max_length=len(block_hashes) * block_size,
+        kv_cache_group_ids=[0],
+        block_pool=block_pool,
+        kv_cache_spec=mamba_spec,
+        drop_eagle_block=True,
+        alignment_tokens=block_size,
+    )[0]
+    assert len(computed_blocks) == 3
+    assert computed_blocks[-1].block_id == 12
 
 
 def get_sliding_window_manager(sliding_window_spec, block_pool, enable_caching=True):
