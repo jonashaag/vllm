@@ -88,14 +88,13 @@ def postprocess_mamba_fused_kernel(
     new_num_computed = num_tokens_running_state + num_accepted - 1
     aligned_new_computed = (new_num_computed // block_size) * block_size
 
-    needs_copy = aligned_new_computed >= num_tokens_running_state
-
-    if not needs_copy:
-        return
-
     # Compute copy parameters
     accept_token_bias = aligned_new_computed - num_tokens_running_state
     dest_block_idx = aligned_new_computed // block_size - 1
+
+    needs_copy = aligned_new_computed >= num_tokens_running_state
+    if not needs_copy or dest_block_idx < src_block_idx:
+        return
 
     # Load state metadata for this layer/state_type
     state_base_addr = tl.load(state_base_addrs_ptr + state_idx)
